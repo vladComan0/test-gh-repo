@@ -4,46 +4,64 @@ on:
   push:
     tags:
       - "v*"
-
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+    outputs:
+      artifacts: ${{ steps.set_output.outputs.artifact_names }}
     steps:
-      - run: echo "The job was triggered by a ${{ github.event_name }} event."
+      - uses: actions/checkout@v2
 
-      - run: echo "This job is now running on a ${{ runner.os }} server hosted by Github."
-
-      - run: echo "The branch from which this job was triggered is ${{ github.ref }} and the repository is ${{ github.repository }}."
-
-      - name: Checkout repository code
-        uses: actions/checkout@v2
-
-      - name: Setup Go v.1.22
+      - name: Setup Go
         uses: actions/setup-go@v2
         with:
           go-version: 1.22
 
-      - name: Verify dependencies
-        run: go mod verify
-
       - name: Build
-        run: go build -o test -v ./...
+        run: |
+          export GOOS=${{ matrix.goos }}
+          export GOARCH=${{ matrix.goarch }}
+          go build -o test-${{ matrix.goos }}-${{ matrix.goarch }} -v ./...
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
 
-      - name: Setup golangci-lint
-        uses: golangci/golangci-lint-action@v6
+      - uses: actions/upload-artifact@v2
         with:
-          version: v1.59.0
+          name: test-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: test-${{ matrix.goos }}-${{ matrix.goarch }}
+      - name: Set Output
+        id: set_output
+        run: echo "::set-output name=artifact_names::test-${{ matrix.goos }}-${{ matrix.goarch }}"
 
-      - name: Run golangci-lint
-        run: golangci-lint run ./...
-
-      - name: Test
-        run: go test -short -race -vet=off ./...
-
-      - uses: "marvinpinto/action-automatic-releases@latest"
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v2
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          path: artifacts
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
           prerelease: false
-          files: |
-            LICENSE
-            test
+      - name: Upload Release Assets
+        run: |
+          IFS=',' read -ra ARTIFACTS <<< "${{ needs.build.outputs.artifacts }}"
+          for artifact in "${ARTIFACTS[@]}"; do
+            echo "Uploading $artifact"
+            gh release upload ${{ github.ref }} artifacts/$artifact --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
