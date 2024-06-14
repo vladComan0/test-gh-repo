@@ -1,0 +1,49 @@
+name: "tagged-release"
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "The job was triggered by a ${{ github.event_name }} event."
+
+      - run: echo "This job is now running on a ${{ runner.os }} server hosted by Github."
+
+      - run: echo "The branch from which this job was triggered is ${{ github.ref }} and the repository is ${{ github.repository }}."
+
+      - name: Checkout repository code
+        uses: actions/checkout@v2
+
+      - name: Setup Go v.1.22
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.22
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build
+        run: go build -o test -v ./...
+
+      - name: Setup golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.59.0
+
+      - name: Run golangci-lint
+        run: golangci-lint run ./...
+
+      - name: Test
+        run: go test -short -race -vet=off ./...
+
+      - uses: "marvinpinto/action-automatic-releases@latest"
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: |
+            LICENSE
+            test
